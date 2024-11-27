@@ -401,7 +401,7 @@ if not df.empty:
 
 
 
-
+    st.dataframe(df)
     # Calculate key metrics
     st.markdown('<h2 class="custom-subheader">For all Sales</h2>', unsafe_allow_html=True)    
 
@@ -433,7 +433,7 @@ if not df.empty:
 
     df['Loss Ratio'] = (total_amount / earned_premium)
 
-    st.dataframe(df)
+ 
     # Sidebar styling and logo
     st.markdown("""
         <style>
