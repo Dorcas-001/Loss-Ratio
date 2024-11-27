@@ -486,9 +486,9 @@ if not df.empty:
     custom_colors = ["#009DAE", "#e66c37", "#461b09", "#f8a785", "#CC3636"]
 
     # Group by day and sum the premiums
-    area_chart_new_renewals = df.groupby(df["Start Date"].dt.strftime("%Y-%m-%d"))['Total Premium_new'].sum().reset_index(name='Total New Business Premium')
+    area_chart_new_renewals = df.groupby(df["Start Date"].dt.strftime("%Y-%m-%d"))['Total Premium_new'].sum().reset_index(name='Total Premium')
 
-    area_chart_endorsement = df.groupby(df["Start Date"].dt.strftime("%Y-%m-%d"))['Total Premium_endorsements'].sum().reset_index(name='Total Endorsement Premium')
+    area_chart_endorsement = df.groupby(df["Start Date"].dt.strftime("%Y-%m-%d"))['Total Premium_endorsements'].sum().reset_index(name='Total Endorsements')
 
     # Merge the new and renewals and endorsement data
     area_chart = pd.merge(area_chart_new_renewals, area_chart_endorsement, left_on='Start Date', right_on='Start Date')
@@ -502,21 +502,37 @@ if not df.empty:
 
         # Add traces
         fig2.add_trace(
-            go.Scatter(x=area_chart['Start Date'], y=area_chart['Total New Business Premium'], name="Total New Business Premium", fill='tozeroy', line=dict(color='#e66c37')),
+            go.Scatter(
+                x=area_chart['Start Date'], 
+                y=area_chart['Total Premium'], 
+                name="Total Premium", 
+                fill='tozeroy', 
+                line=dict(color='#e66c37')),
             secondary_y=False,
         )
 
         fig2.add_trace(
-            go.Scatter(x=area_chart['Start Date'], y=area_chart['Total Endorsement Premium'], name="Total Endorsement Premium", fill='tozeroy', line=dict(color='#009DAE')),
+            go.Scatter(
+                x=area_chart['Start Date'], 
+                y=area_chart['Total Endorsements'], 
+                name="Total Endorsements", 
+                fill='tozeroy', 
+                line=dict(color='#009DAE')),
             secondary_y=True,
         )
 
         # Set x-axis title
-        fig2.update_xaxes(title_text="Start Premium Date", tickangle=45)  # Rotate x-axis labels to 45 degrees for better readability
+        fig2.update_xaxes(
+            title_text="Start Premium Date", 
+            tickangle=45)  # Rotate x-axis labels to 45 degrees for better readability
 
         # Set y-axes titles
-        fig2.update_yaxes(title_text="<b>Total New Business Premium</b>", secondary_y=False)
-        fig2.update_yaxes(title_text="<b>Total Endorsement Premium</b>", secondary_y=True)
+        fig2.update_yaxes(
+            title_text="<b>Total Premium</b>", 
+            secondary_y=False)
+        fig2.update_yaxes(
+            title_text="<b>Total Endorsements</b>", 
+            secondary_y=True)
 
         st.markdown('<h3 class="custom-subheader">Total Premium and Endorsements Over Time</h3>', unsafe_allow_html=True)
         st.plotly_chart(fig2, use_container_width=True)
@@ -525,7 +541,7 @@ if not df.empty:
 
 
     # Group data by 'Year' and calculate the sum of Total Premium and Loss Ratio
-    yearly_data = df.groupby('Year')[['Total Premium', 'Loss Ratio']].sum().reset_index()
+    yearly_data = df.groupby('Year')[['Total Premium', 'Total Amount sum']].sum().reset_index()
 
 
 
@@ -547,8 +563,8 @@ if not df.empty:
         # Add Loss Ratio bar trace
         fig_yearly_avg_premium.add_trace(go.Bar(
             x=yearly_data['Year'],
-            y=yearly_data['Loss Ratio'],
-            name='Loss Ratio',
+            y=yearly_data['Total Amount sum'],
+            name='Total Visit Amount',
             textposition='inside',
             textfont=dict(color='white'),
             hoverinfo='x+y+name',
@@ -558,7 +574,7 @@ if not df.empty:
         fig_yearly_avg_premium.update_layout(
             barmode='group',  # Grouped bar chart
             xaxis_title="Year",
-            yaxis_title="Value",
+            yaxis_title="Total Amount",
             font=dict(color='Black'),
             xaxis=dict(title_font=dict(size=14), tickfont=dict(size=12), type='category'),
             yaxis=dict(title_font=dict(size=14), tickfont=dict(size=12)),
@@ -567,14 +583,14 @@ if not df.empty:
         )
 
         # Display the chart in Streamlit
-        st.markdown('<h3 class="custom-subheader">Yearly Distribution of Total Premium and Loss Ratio</h3>', unsafe_allow_html=True)
+        st.markdown('<h3 class="custom-subheader">Yearly Distribution of Total Premium and Endorsements</h3>', unsafe_allow_html=True)
         st.plotly_chart(fig_yearly_avg_premium, use_container_width=True)
 
 
     cols1, cols2 = st.columns(2)
 
     # Group data by 'Year' and calculate the sum of Total Premium and Loss Ratio
-    yearly_data = df.groupby('Month')[['Total Premium', 'Loss Ratio']].sum().reset_index()
+    yearly_data = df.groupby('Month')[['Total Premium', 'Total Amount sum']].sum().reset_index()
 
 
 
@@ -596,8 +612,8 @@ if not df.empty:
         # Add Loss Ratio bar trace
         fig_yearly_avg_premium.add_trace(go.Bar(
             x=yearly_data['Month'],
-            y=yearly_data['Loss Ratio'],
-            name='Loss Ratio',
+            y=yearly_data['Total Amount sum'],
+            name='Total Visit Amount',
             textposition='inside',
             textfont=dict(color='white'),
             hoverinfo='x+y+name',
@@ -607,7 +623,7 @@ if not df.empty:
         fig_yearly_avg_premium.update_layout(
             barmode='group',  # Grouped bar chart
             xaxis_title="Month",
-            yaxis_title="Value",
+            yaxis_title="Total Amount",
             font=dict(color='Black'),
             xaxis=dict(title_font=dict(size=14), tickfont=dict(size=12), type='category'),
             yaxis=dict(title_font=dict(size=14), tickfont=dict(size=12)),
@@ -616,7 +632,7 @@ if not df.empty:
         )
 
         # Display the chart in Streamlit
-        st.markdown('<h3 class="custom-subheader">Monthly Distribution of Total Premium and Loss Ratio</h3>', unsafe_allow_html=True)
+        st.markdown('<h3 class="custom-subheader">Monthly Distribution of Total Premium and Endorsements</h3>', unsafe_allow_html=True)
         st.plotly_chart(fig_yearly_avg_premium, use_container_width=True)
 
 
