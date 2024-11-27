@@ -436,4 +436,4 @@ if not df.empty:
     display_metric(cols2, "Average Premium Per Principal Member", f"{average_premium_per_life:.0f}")
 
 
-    df
+    st.dataframe(df)
