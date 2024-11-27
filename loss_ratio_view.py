@@ -433,7 +433,7 @@ if not df.empty:
 
     df['Loss Ratio'] = (total_amount / earned_premium)
 
-    df
+    st.dataframe(df)
     # Sidebar styling and logo
     st.markdown("""
         <style>
