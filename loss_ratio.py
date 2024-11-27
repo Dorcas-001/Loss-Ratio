@@ -99,8 +99,8 @@ if page == "Home":
 elif page == "Overview":
     exec(open("overview.py").read())
 elif page == "Loss Ratio View":
-    exec(open("segment.py").read())
+    exec(open("loss_ratio_view.py").read())
 elif page == "Visit View":
-    exec(open("type.py").read())
+    exec(open("visit.py").read())
 elif page == "Premium View":
     exec(open("premium.py").read())
