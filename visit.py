@@ -248,14 +248,15 @@ if not df.empty:
     total_closed = (df_close["Total Amount"].sum())/scale
     total_open = (df_open["Total Amount"].sum())/scale
 
-    total_closed_per = (total_closed/total_amount)*100
-    total_open_per = (total_open/total_amount)*100
+
 
     total_clients = df["Client Name"].nunique()
     total_visits = df["Visit ID"].nunique()
 
-
-
+    total_close = df_close["Visit ID"].nunique()
+    total_ope = df_open["Visit ID"].nunique()
+    total_closed_per = (total_close/total_visits)*100
+    total_open_per = (total_ope/total_visits)*100
 
 
 
@@ -320,7 +321,7 @@ if not df.empty:
     display_metric(cols1, "Total Clients", total_clients)
     display_metric(cols2, "Total Visits", total_visits)
     display_metric(cols3, "Total Visit Amount", F"{total_amount: .0F} M")
-    display_metric(cols1, "Average Visit Amount Per Client", F"{average_amount: .0F} M")
+    display_metric(cols1, "Average Visit Amount Per Client", F"{average_amount: .1F} M")
     display_metric(cols2, "Percentage Closed Visit", F"{total_closed_per: .0F} %")
     display_metric(cols3, "Percentage Open Visit", F"{total_open_per: .0F} %")
 
@@ -422,90 +423,74 @@ if not df.empty:
     monthly_sales_count = df.groupby(['Month']).size()
 
 
-    # Define custom colors
 
     # Create the layout columns
     cls1, cls2 = st.columns(2)
 
     with cls1:
+
         fig_monthly_premium = go.Figure()
 
         for idx, Client_Segment in enumerate(monthly_premium.columns):
-            fig_monthly_premium.add_trace(go.Bar(
-                x=monthly_premium.index,
-                y=monthly_premium[Client_Segment],
-                name=Client_Segment,
-                textposition='inside',
-                textfont=dict(color='white'),
-                hoverinfo='x+y+name',
-                marker_color=custom_colors[idx % len(custom_colors)]  # Cycle through custom colors
-            ))
+                fig_monthly_premium.add_trace(go.Bar(
+                    x=monthly_premium.index,
+                    y=monthly_premium[Client_Segment],
+                    name=Client_Segment,
+                    textposition='inside',
+                    textfont=dict(color='white'),
+                    hoverinfo='x+y+name',
+                    marker_color=custom_colors[idx % len(custom_colors)]  # Cycle through custom colors
+                ))
 
-        # Add a secondary y-axis for the count of sales
-        fig_monthly_premium.add_trace(go.Scatter(
-            x=monthly_sales_count.index,
-            y=monthly_sales_count,
-            mode='lines+markers',
-            name='Number of Visits',
-            yaxis='y2',
-            line=dict(color='red', width=2),
-            marker=dict(size=6, symbol='circle', color='red')
-        ))
 
-        # Set layout for the Total Amount sum chart
+            # Set layout for the Total Amount sum chart
         fig_monthly_premium.update_layout(
-            barmode='group',  # Grouped bar chart
-            xaxis_title="Month",
-            yaxis_title="Total Visit Amount",
-            yaxis2=dict(
-                title="Number of Visits",
-                overlaying='y',
-                side='right'
-            ),
-            font=dict(color='Black'),
-            xaxis=dict(title_font=dict(size=14), tickfont=dict(size=12)),
-            yaxis=dict(title_font=dict(size=14), tickfont=dict(size=12)),
-            margin=dict(l=0, r=0, t=30, b=50),
-        )
+                barmode='group',  # Grouped bar chart
+                xaxis_title="Month",
+                yaxis_title="Total Visit Amount",
+                font=dict(color='Black'),
+                xaxis=dict(title_font=dict(size=14), tickfont=dict(size=12)),
+                yaxis=dict(title_font=dict(size=14), tickfont=dict(size=12)),
+                margin=dict(l=0, r=0, t=30, b=50),
+            )
 
-        # Display the Total Amount sum chart in Streamlit
+            # Display the Total Amount sum chart in Streamlit
         st.markdown('<h3 class="custom-subheader">Avearge Monthly Visits and Visit Amount by Visit Type</h3>', unsafe_allow_html=True)
         st.plotly_chart(fig_monthly_premium, use_container_width=True)
 
-# Sort the DataFrame by Loss Ratio in descending order and select the top 10 clients
-    top_10_clients = df.sort_values(by='Total Amount', ascending=False).head(10)
 
-    # Define a single color for all bars
-    single_color = '#009DAE'
+    # Group by Client Name and sum the Total Amount
+    df_grouped = df.groupby('Client Name')['Total Amount'].sum().nlargest(15).reset_index()
 
-    with cls1:
-        # Create the bar chart for Loss Ratio by Client Name
-        fig = go.Figure()
+    # Sort the client_df by Total Amount in descending order
+    client_df = df_grouped.sort_values(by='Total Amount', ascending=False)
 
-        # Add bars for each Client Name
-        fig.add_trace(go.Bar(
-            x=top_10_clients['Client Name'],
-            y=top_10_clients['Total Amount'],
-            name='Visit amount',
-            text=[f'{value:.2f}' for value in top_10_clients['Total Amount sum']],
-            textposition='auto',
-            marker_color=single_color 
-        ))
+    with cls2:
+            # Create the bar chart
+            fig = go.Figure()
 
-        fig.update_layout(
-            barmode='group',
-            yaxis_title="Total Visit Amount",
-            xaxis_title="Client Name",
-            font=dict(color='Black'),
-            xaxis=dict(title_font=dict(size=14), tickfont=dict(size=12)),
-            yaxis=dict(title_font=dict(size=14), tickfont=dict(size=12)),
-            margin=dict(l=0, r=0, t=30, b=50)
-        )
+            # Add bars for each Client
+            fig.add_trace(go.Bar(
+                x=client_df['Client Name'],
+                y=client_df['Total Amount'],
+                text=[f'{value/1e6:.0f}M' for value in client_df['Total Amount']],
+                textposition='auto',
+                marker_color=custom_colors[:len(client_df)]  # Use custom colors
+            ))
 
-        # Display the chart in Streamlit
-        st.markdown('<h3 class="custom-subheader">Top 10 Clients by Visit Amount</h3>', unsafe_allow_html=True)
-        st.plotly_chart(fig, use_container_width=True)
+            fig.update_layout(
+                yaxis_title="Total Amount",
+                xaxis_title="Client Name",
+                font=dict(color='Black'),
+                xaxis=dict(title_font=dict(size=14), tickfont=dict(size=12)),
+                yaxis=dict(title_font=dict(size=14), tickfont=dict(size=12)),
+                margin=dict(l=0, r=0, t=30, b=50)
+            )
 
+
+            # Display the chart in Streamlit
+            st.markdown('<h3 class="custom-subheader">Top 10 Clients by Visit Amount</h3>', unsafe_allow_html=True)
+            st.plotly_chart(fig, use_container_width=True)
 
 
     # Create the layout columns
@@ -556,7 +541,7 @@ if not df.empty:
 
     # Filter the original DataFrame to include only the top 10 clients
     client_df = df_grouped[df_grouped['Client Name'].isin(top_10_clients['Client Name'])]
-    
+
     # Sort the client_df by Total Amount in descending order
     client_df = client_df.sort_values(by='Total Amount', ascending=False)
 
@@ -588,39 +573,38 @@ if not df.empty:
                 )
 
                 # Display the chart in Streamlit
-        st.markdown('<h3 class="custom-subheader">Total Client Visit Amount by Visit Type</h3>', unsafe_allow_html=True)
+        st.markdown('<h3 class="custom-subheader">Top 10 Clients by Visit Amount and Visit Type</h3>', unsafe_allow_html=True)
         st.plotly_chart(fig, use_container_width=True)
 
-# Sort the DataFrame by Loss Ratio in descending order and select the top 10 clients
-    top_10_clients = df.sort_values(by='Total Amount', ascending=False).head(10)
+    # Group by Client Name and sum the Total Amount
+    df_grouped = df.groupby('Provider Name')['Total Amount'].sum().nlargest(15).reset_index()
 
-    # Define a single color for all bars
-    single_color = '#009DAE'
+    # Sort the client_df by Total Amount in descending order
+    client_df = df_grouped.sort_values(by='Total Amount', ascending=False)
 
-    with cls1:
-        # Create the bar chart for Loss Ratio by Client Name
-        fig = go.Figure()
+    with cls2:
+            # Create the bar chart
+            fig = go.Figure()
 
-        # Add bars for each Client Name
-        fig.add_trace(go.Bar(
-            x=top_10_clients['Provider Name'],
-            y=top_10_clients['Total Amount'],
-            name='Visit amount',
-            text=[f'{value:.2f}' for value in top_10_clients['Total Amount sum']],
-            textposition='auto',
-            marker_color=single_color 
-        ))
+            # Add bars for each Client
+            fig.add_trace(go.Bar(
+                x=client_df['Provider Name'],
+                y=client_df['Total Amount'],
+                text=[f'{value/1e6:.0f}M' for value in client_df['Total Amount']],
+                textposition='auto',
+                marker_color=custom_colors[:len(client_df)]  # Use custom colors
+            ))
 
-        fig.update_layout(
-            barmode='group',
-            yaxis_title="Total Visit Amount",
-            xaxis_title="Provider Name",
-            font=dict(color='Black'),
-            xaxis=dict(title_font=dict(size=14), tickfont=dict(size=12)),
-            yaxis=dict(title_font=dict(size=14), tickfont=dict(size=12)),
-            margin=dict(l=0, r=0, t=30, b=50)
-        )
+            fig.update_layout(
+                yaxis_title="Total Amount",
+                xaxis_title="Provider Name",
+                font=dict(color='Black'),
+                xaxis=dict(title_font=dict(size=14), tickfont=dict(size=12)),
+                yaxis=dict(title_font=dict(size=14), tickfont=dict(size=12)),
+                margin=dict(l=0, r=0, t=30, b=50)
+            )
 
-        # Display the chart in Streamlit
-        st.markdown('<h3 class="custom-subheader">Top 10 Service Providers by Visit Amount</h3>', unsafe_allow_html=True)
-        st.plotly_chart(fig, use_container_width=True)
+
+            # Display the chart in Streamlit
+            st.markdown('<h3 class="custom-subheader">Top 10 Service Providers by Visit Amount</h3>', unsafe_allow_html=True)
+            st.plotly_chart(fig, use_container_width=True)
