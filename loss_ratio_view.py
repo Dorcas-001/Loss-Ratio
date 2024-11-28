@@ -418,9 +418,9 @@ if not df.empty:
   
     cols1,cols2, cols3 = st.columns(3)
 
-    display_metric(cols1, "Total visit Amount", f"{total_amount:.0f} M")
-    display_metric(cols2, "Total Days Since Start", f"{total_days:.0f} days")
-    display_metric(cols3, "Total Days on Cover", f"{total_days_on_cover:.0f} days")
+    display_metric(cols1, "Total Expected Claim Amount", f"{total_amount:.0f} M")
+    display_metric(cols2, "Days Since Premium Start", f"{total_days:.0f} days")
+    display_metric(cols3, "Premium Duration (Days)", f"{total_days_on_cover:.0f} days")
     display_metric(cols1, "Earned Premium", f"{earned_premium: .0f} M")
     display_metric(cols2, "Loss Ratio", f"{loss_ratio_amount: .0f} M")
     display_metric(cols3, "Percentage Loss Ratio", f"{loss_ratio: .0f} %")
