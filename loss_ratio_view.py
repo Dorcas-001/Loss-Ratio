@@ -28,62 +28,106 @@ st.markdown('''
     </style>
 ''', unsafe_allow_html=True)
 
-st.markdown('<h1 class="main-title">LOSS RATIO VIEW</h1>', unsafe_allow_html=True)
+st.markdown('<h1 class="main-title">LOSS RATIO VIEW WITH EXPECTED CLAIM AMOUNT</h1>', unsafe_allow_html=True)
 
 
 
 # Filepaths and sheet names
-filepath_premiums = "WRITTEN PREMIUM 2024 (1).xlsx"
-sheet_name_new_business = "NEW BUSINES"
-sheet_name_endorsements = "ENDORSMENTS"
+filepath_premiums = "JAN-NOV 2024 GWP.xlsx"
+sheet_name_new_business = "2023"
+sheet_name_endorsements = "2024"
 filepath_visits = "VisitLogs_25Oct2024 (1).xlsx"
 
 # Read the premium data
-df_new_business = pd.read_excel(filepath_premiums, sheet_name=sheet_name_new_business)
-df_endorsements = pd.read_excel(filepath_premiums, sheet_name=sheet_name_endorsements)
+df_2023 = pd.read_excel(filepath_premiums, sheet_name=sheet_name_new_business)
+df_2024 = pd.read_excel(filepath_premiums, sheet_name=sheet_name_endorsements)
 
 # Read the visit logs
 df_visits = pd.read_excel(filepath_visits)
 
+df_premiums = pd.concat([df_2023, df_2024])
 
-# Function to calculate days since start
+drop_cols=['Amount Received - Jan _ march', 'MONTH', 'Contract days', 'Cover days', 'Amount Received - April', 'Amount Received - May', 'Amount Received - June', 'Amount Received - JULY','Unnamed: 24', 'Unnamed: 25', 'Unnamed: 26']
+
+df_premiums.drop(columns=drop_cols, inplace = True)
+
+df_premiums["Start Date"] = pd.to_datetime(df_premiums["Start Date"])
+df_premiums["Month"] = df_premiums["Start Date"].dt.strftime("%B")
+df_premiums["Year"] = df_premiums["Start Date"].dt.year
+
+
+# Split the DataFrame into two: one with endorsements and one without
+df_endorsements = df_premiums[df_premiums['Cover Type'].str.contains('Endorsement', case=False, na=False)]
+df_non_endorsements = df_premiums[~df_premiums['Cover Type'].str.contains('Endorsement', case=False, na=False)]
+
+# Calculate 'Days Since Start' and 'days_on_cover' for non-endorsement rows
 current_date = datetime.now()
+df_non_endorsements['Days Since Start'] = (current_date - df_non_endorsements['Start Date']).dt.days
+df_non_endorsements['days_on_cover'] = (df_non_endorsements['End Date'] - df_non_endorsements['Start Date']).dt.days
 
-def calculate_days(row):
-    start_date = row['Start Date']
-    if pd.notnull(start_date):
-        days = (current_date - pd.to_datetime(start_date)).days
-    else:
-        days = None
-    return days
-
-# Calculate 'Days Since Start' for each row
-df_new_business['Days Since Start'] = df_new_business.apply(calculate_days, axis=1)
-
-# Calculate 'days_on_cover'
-df_new_business["days_on_cover"] = (df_new_business["End Date"] - df_new_business['Start Date']).dt.days
 
 # Prioritize 'renewed' cover type values
-def prioritize_renewed(df):
-    df_sorted = df.sort_values(by=['Client Name', 'Cover Type'], ascending=[True, False])
-    df_deduped = df_sorted.drop_duplicates(subset=['Client Name'], keep='first')
-    return df_deduped
+def prioritize_renewal(df):
+    # Identify clients with both 'new' and 'renewal' cover types
+    clients_with_both = df.groupby('Client Name')['Cover Type'].nunique()
+    clients_with_both = clients_with_both[clients_with_both == 2].index
+    
+    # Separate clients with both cover types from others
+    df_clients_with_both = df[df['Client Name'].isin(clients_with_both)]
+    df_other_clients = df[~df['Client Name'].isin(clients_with_both)]
+    
+    # Sort and deduplicate clients with both cover types, prioritizing 'renewal'
+    df_clients_with_both_sorted = df_clients_with_both.sort_values(by=['Client Name', 'Cover Type'], ascending=[True, False])
+    df_clients_with_both_deduped = df_clients_with_both_sorted.drop_duplicates(subset=['Client Name'], keep='first')
+    
+    # Combine the deduplicated clients with both cover types and the other clients
+    df_result = pd.concat([df_clients_with_both_deduped, df_other_clients])
+    
+    return df_result
 
-df_new_business = prioritize_renewed(df_new_business)
+df_prioritized = prioritize_renewal(df_non_endorsements)
+
+# Merge endorsements with premiums on Client Name
+df_merged_endorsements = pd.merge(df_endorsements, df_prioritized[['Client Name', 'Start Date', 'End Date']], on='Client Name', suffixes=('_endorsement', '_premium'))
+
+# Filter endorsements to include only those within the start and end date range of the premiums
+df_filtered_endorsements = df_merged_endorsements[
+    (df_merged_endorsements['Start Date_endorsement'] >= df_merged_endorsements['Start Date_premium']) & 
+    (df_merged_endorsements['Start Date_endorsement'] <= df_merged_endorsements['End Date_premium'])
+]
+
+# Drop the additional date columns used for filtering
+df_filtered_endorsements = df_filtered_endorsements.drop(columns=['Start Date_premium', 'End Date_premium'])
+
+# Rename the date columns back to their original names
+df_filtered_endorsements = df_filtered_endorsements.rename(columns={'Start Date_endorsement': 'Start Date', 'End Date_endorsement': 'End Date'})
+
+# Combine the processed non-endorsement DataFrame with the filtered endorsements DataFrame
+df_premiums = pd.concat([df_prioritized, df_filtered_endorsements])
+
+# Reset the index of the resulting DataFrame
+df_premiums.reset_index(drop=True, inplace=True)
 
 
-# Ensure Visit Date is in datetime format
+
+
 df_visits['Visit Date'] = pd.to_datetime(df_visits['Visit Date'])
+df_premiums['Start Date'] = pd.to_datetime(df_premiums['Start Date'])
+df_premiums['End Date'] = pd.to_datetime(df_premiums['End Date'])
 
 # Merge new business data with visit data on Client Name
-df_merged = pd.merge(df_visits, df_new_business[['Client Name', 'Start Date']], on='Client Name', how='inner')
+df_merged = pd.merge(df_visits, df_premiums[['Client Name', 'Start Date', 'End Date']], on='Client Name', how='outer')
 
-# Filter visits to include only those within the start date range
-df_visits = df_merged[df_merged['Visit Date'] >= df_merged['Start Date']]
+
+# Filter visits to include only those within the start and end date range
+df_filtered_visits = df_merged[
+    (df_merged['Visit Date'] >= df_merged['Start Date']) & 
+    (df_merged['Visit Date'] <= df_merged['End Date'])
+]
 
 
 # Aggregate visit data by 'Client Name'
-df_visits_agg = df_visits.groupby('Client Name').agg({
+df_visits_agg = df_filtered_visits.groupby('Client Name').agg({
     'Visit ID': 'count',  # Count of visits
     'Total Amount': 'sum',  # Sum of visit close amounts
     'Pharmacy Claim Amount': 'sum',  # Sum of pharmacy claim amounts
@@ -101,11 +145,16 @@ df_visits_agg['Visit Date min'] = pd.to_datetime(df_visits_agg['Visit Date min']
 df_visits_agg['Month'] = df_visits_agg['Visit Date min'].dt.strftime('%B')
 df_visits_agg['Year'] = df_visits_agg['Visit Date min'].dt.year
 
-# Merge the new business and endorsement data on 'Client Name'
-df_premiums = pd.concat([df_new_business, df_endorsements])
-# Assuming df_premiums is your DataFrame
-print("Column names in the DataFrame:")
-print(df_premiums.columns.tolist())
+# Clean Client Name columns to ensure consistency
+df_visits_agg['Client Name'] = df_visits_agg['Client Name'].str.strip().str.lower()
+df_premiums['Client Name'] = df_premiums['Client Name'].str.strip().str.lower()
+
+# Ensure Client Name columns are of the same data type
+df_visits_agg['Client Name'] = df_visits_agg['Client Name'].astype(str)
+df_premiums['Client Name'] = df_premiums['Client Name'].astype(str)
+
+# Merge the aggregated visit data with the premium data on Client Name
+df_combined = pd.merge(df_visits_agg, df_premiums, on='Client Name', how='outer')
 
 
 
@@ -119,6 +168,7 @@ df_combined["End Date"] = pd.to_datetime(df_combined["End Date"])
 
 df = df_combined
 
+df["Client Name"] = df["Client Name"].str.upper()
 
 
 
@@ -172,9 +222,57 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 
+
+
+
+
+# Dictionary to map month names to their order
+month_order = {
+    "January": 1, "February": 2, "March": 3, "April": 4, 
+    "May": 5, "June": 6, "July": 7, "August": 8, 
+    "September": 9, "October": 10, "November": 11, "December": 12
+}
+
+# Sort months based on their order
+sorted_months = sorted(df['Month'].dropna().unique(), key=lambda x: month_order[x])
+
+
+# Sidebar for filters
+st.sidebar.header("Filters")
+year = st.sidebar.multiselect("Select Year", options=sorted(df['Year'].dropna().unique()))
+month = st.sidebar.multiselect("Select Month", options=sorted_months)
+cover = st.sidebar.multiselect("Select Cover Type", options=df['Cover Type'].unique())
+# segment = st.sidebar.multiselect("Select Client Segment", options=df['Client Segment'].unique())
+client_names = sorted(df['Client Name'].unique())
+client_name = st.sidebar.multiselect("Select Client Name", options=client_names)
+
+# Apply filters to the DataFrame
+if 'Start Year' in df.columns and year:
+    df = df[df['Start Year'].isin(year)]
+if 'Start Month' in df.columns and month:
+    df = df[df['Start Month'].isin(month)]
+if 'Cover Type' in df.columns and cover:
+    df = df[df['Cover Type'].isin(cover)]
+# if 'Client Segment' in df.columns and segment:
+#     df = df[df['Client Segment'].isin(segment)]
+if 'Client Name' in df.columns and client_name:
+    df = df[df['Client Name'].isin(client_name)]
+
+# Determine the filter description
+filter_description = ""
+if year:
+    filter_description += f"{', '.join(map(str, year))} "
+if cover:
+    filter_description += f"{', '.join(map(str, cover))} "
+if month:
+    filter_description += f"{', '.join(month)} "
+if not filter_description:
+    filter_description = "All data"
+
+
 # Get minimum and maximum dates for the date input
 startDate = df["Start Date"].min()
-endDate = df["Start Date"].max()
+endDate = df["End Date"].max()
 
 # Define CSS for the styled date input boxes
 st.markdown("""
@@ -192,6 +290,7 @@ st.markdown("""
     }
     </style>
     """, unsafe_allow_html=True)
+
 
 
 # Create 2-column layout for date inputs
@@ -215,49 +314,6 @@ with col2:
     date2 = pd.to_datetime(display_date_input(col2, "End Date", endDate, startDate, endDate))
 
 
-
-# Dictionary to map month names to their order
-month_order = {
-    "January": 1, "February": 2, "March": 3, "April": 4, 
-    "May": 5, "June": 6, "July": 7, "August": 8, 
-    "September": 9, "October": 10, "November": 11, "December": 12
-}
-
-# Sort months based on their order
-sorted_months = sorted(df['Month'].dropna().unique(), key=lambda x: month_order[x])
-
-
-# Sidebar for filters
-st.sidebar.header("Filters")
-year = st.sidebar.multiselect("Select Year", options=sorted(df['Year'].dropna().unique()))
-month = st.sidebar.multiselect("Select Month", options=sorted_months)
-# cover = st.sidebar.multiselect("Select Cover Type", options=df['Cover Type'].unique())
-segment = st.sidebar.multiselect("Select Client Segment", options=df['Client Segment'].unique())
-client_name = st.sidebar.multiselect("Select Client Name", options=df['Client Name'].unique())
-
-
-# Apply filters to the DataFrame
-if 'Start Year' in df.columns and year:
-    df = df[df['Start Year'].isin(year)]
-if 'Start Month' in df.columns and month:
-    df = df[df['Start Month'].isin(month)]
-# if 'Cover Type' in df.columns and cover:
-#     df = df[df['Cover Type'].isin(cover)]
-if 'Client Segment' in df.columns and segment:
-    df = df[df['Client Segment'].isin(segment)]
-if 'Client Name' in df.columns and client_name:
-    df = df[df['Client Name'].isin(client_name)]
-
-# Determine the filter description
-filter_description = ""
-if year:
-    filter_description += f"{', '.join(map(str, year))} "
-# if cover:
-#     filter_description += f"{', '.join(map(str, cover))} "
-if month:
-    filter_description += f"{', '.join(month)} "
-if not filter_description:
-    filter_description = "All data"
 
 
 # Handle non-finite values in 'Start Year' column
@@ -298,61 +354,58 @@ df = df[
 ]
 
 
-drop_cols = ['Unnamed: 14', 'Unnamed: 15','NAMES', 'DAYS','Intermediary name', 'First issued quote date', 'Aging', 'Scheme Name','Annual Premium', 'Prorated Premium', 'CBHI', 'Admin','5% CBHI', 'Admin fees', 'Total insured Premium', 'Fund Amount','Basic Premium']
-df.drop(columns=drop_cols, inplace = True)
 
-# Filter the concatenated DataFrame to include only endorsements
-df_hares = df[df['Client Segment'] == 'Hares']
-df_elephants = df[df['Client Segment'] == 'Elephant']
-df_tiger = df[df['Client Segment'] == 'Tigers']
-df_whale = df[df['Client Segment'] == 'Whale']
 
-df_new = df[df['Cover Type'] == 'New Insured']
-df_renew = df[df['Cover Type'] == 'Renew/Insured']
+# # Filter the concatenated DataFrame to include only endorsements
+# df_hares = df[df['Client Segment'] == 'Hares']
+# df_elephants = df[df['Client Segment'] == 'Elephant']
+# df_tiger = df[df['Client Segment'] == 'Tigers']
+# df_whale = df[df['Client Segment'] == 'Whale']
 
+
+df_new = df[df['Cover Type'] == 'New']
+df_renew = df[df['Cover Type'] == 'Renewal']
+df_combined = df[df['Cover Type'].isin(['New', 'Renewal'])]
+
+df_endorsements = df[df['Cover Type'] == 'Endorsement']
 
 if not df.empty:
 
     scale=1_000_000  # For millions
 
-    df["No. of staffs"] = pd.to_numeric(df["No. of staffs"], errors='coerce').fillna(0).astype(int)
-    df["Dependents"] = pd.to_numeric(df["Dependents"], errors='coerce').fillna(0).astype(int)
 
     # Scale the sums
 
-    total_hares = (df_hares['Total Premium'].sum())/scale
-    total_tiger = (df_tiger['Total Premium'].sum())/scale
-    total_elephant = (df_elephants['Total Premium'].sum())/scale
-    total_whale = (df_whale['Total Premium'].sum())/scale
+    # total_hares = (df_hares['Total Premium'].sum())/scale
+    # total_tiger = (df_tiger['Total Premium'].sum())/scale
+    # total_elephant = (df_elephants['Total Premium'].sum())/scale
+    # total_whale = (df_whale['Total Premium'].sum())/scale
 
-    total_new = (df_new["Total Premium"].sum())/scale
-    total_renew = (df_renew["Total Premium"].sum())/scale
+    total_new = (df_new["Total"].sum())/scale
+    total_renew = (df_renew["Total"].sum())/scale
+    total_pre = total_new +total_renew
+    total_endorsements_amount = df_endorsements["Total"].sum()/scale
+    total_pharm = df["Pharmacy Claim Amount sum"].sum()/scale
 
     total_clients = df["Client Name"].nunique()
-    total_mem = df["No. of staffs"].sum()
-    total_dependents = df["Dependents"].sum()
-    total_lives = df["Total lives"].sum()
-    average_dep = total_mem/total_dependents
+    total_endorsements = df_endorsements["Client Name"].count()
+    num_new = df_new["Client Name"].nunique()
+    num_renew = df_renew["Client Name"].nunique()
+    num_visits = df["Visit ID count"].sum()
 
-    total_days_on_cover = df["days_on_cover"].sum()
 
-    total_new_premium = (df["Total Premium_new"].sum())/scale
-    total_endorsement = (df["Total Premium_endorsements"].sum())/scale
-    total_premium = (df["Total Premium"].sum())/scale
+    # total_new_premium = (df["Total Premium_new"].sum())/scale
+    # total_endorsement = (df["Total Premium_endorsements"].sum())/scale
+    total_premium = (df["Total"].sum())/scale
     total_days = df["Days Since Start"].sum()
     total_days_on_cover = df['days_on_cover'].sum()
     total_amount = (df["Total Amount sum"].sum())/scale
-    average_pre = (df["Total Premium"].mean())/scale
+    average_pre = (df["Total"].mean())/scale
     average_days = df["Days Since Start"].mean()
-    average_premium_per_life = total_premium/total_mem
 
     earned_premium = (total_premium * total_days)/total_days_on_cover
     loss_ratio_amount = total_amount / earned_premium
     loss_ratio= (total_amount / earned_premium) *100
-
-
-
-
 
     # Create 4-column layout for metric cards# Define CSS for the styled boxes and tooltips
     st.markdown("""
@@ -388,7 +441,7 @@ if not df.empty:
         </style>
         """, unsafe_allow_html=True)
 
-
+    st.dataframe(df)
 
     # Function to display metrics in styled boxes with tooltips
     def display_metric(col, title, value):
@@ -400,30 +453,42 @@ if not df.empty:
             """, unsafe_allow_html=True)
 
 
-
-    st.dataframe(df)
     # Calculate key metrics
-    st.markdown('<h2 class="custom-subheader">For all Sales</h2>', unsafe_allow_html=True)    
+    st.markdown('<h2 class="custom-subheader">For all Sales in Numbers</h2>', unsafe_allow_html=True)    
 
     cols1,cols2, cols3 = st.columns(3)
 
-    display_metric(cols1, "Total Clients", total_clients)
-    display_metric(cols2, "Total Premium", F"{total_premium: .0F} M")
-    display_metric(cols3, "Total New Business Premium", F"{total_new_premium: .0F} M")
-    display_metric(cols1, "Total Endorsement", F"{total_endorsement: .0F} M")
-    display_metric(cols2, "Total New Premium", F"{total_new: .0F} M")
-    display_metric(cols3, "Total Renewals", F"{total_renew: .0F} M")
+    display_metric(cols1, "Number of Clients", total_clients)
+    display_metric(cols2, "Number of New Business", num_new)
+    display_metric(cols3, "Number of Renewals", num_renew)
+    display_metric(cols1, "Number of Endorsements",total_endorsements)
+    display_metric(cols2, "Number of Visits", f"{num_visits:,.0f}")
+
+    # Calculate key metrics
+    st.markdown('<h2 class="custom-subheader">For all Sales Amount</h2>', unsafe_allow_html=True)    
+
+    cols1,cols2, cols3 = st.columns(3)
+
+    display_metric(cols1, "Total Premium", f"{total_premium:,.0f} M")
+    display_metric(cols2, "Total New Business Premium", f"{total_new:,.0f} M")
+    display_metric(cols3, "Total Renewal Premium", f"{total_renew:,.0f} M")
+    display_metric(cols1, "Total Endorsement Premium", f"{total_endorsements_amount:,.0f} M")
+    display_metric(cols2, "Total Expected Pharmacy Amount", f"{total_pharm:,.0f} M")
+    display_metric(cols3, "Total Expected Claim Amount", f"{total_amount:,.0f} M")
+    display_metric(cols1, "Average Premium per Client", f"{average_pre:,.0f} M")
 
     st.markdown('<h2 class="custom-subheader">For Loss Ratio</h2>', unsafe_allow_html=True)    
   
     cols1,cols2, cols3 = st.columns(3)
 
-    display_metric(cols1, "Total Expected Claim Amount", f"{total_amount:.0f} M")
-    display_metric(cols2, "Days Since Premium Start", f"{total_days:.0f} days")
-    display_metric(cols3, "Premium Duration (Days)", f"{total_days_on_cover:.0f} days")
-    display_metric(cols1, "Earned Premium", f"{earned_premium: .0f} M")
-    display_metric(cols2, "Loss Ratio", f"{loss_ratio_amount: .0f} M")
+    display_metric(cols1, "Days Since  Premium Start", f"{total_days:,.0f} days")
+    display_metric(cols2, "Premium Duration (Days)", f"{total_days_on_cover:,.0f} days")
+    display_metric(cols3, "Average Days Since  Premium Start per Client", f"{average_days:,.0f} days")
+    display_metric(cols1, "Earned Premium", f"{earned_premium:,.0f} M")
+    display_metric(cols2, "Loss Ratio", f"{loss_ratio_amount:,.0f} M")
     display_metric(cols3, "Percentage Loss Ratio", f"{loss_ratio: .0f} %")
+
+
 
     # Ensure 'Start Date' is in datetime format
     df['Start Date'] = pd.to_datetime(df['Start Date'], errors='coerce')
@@ -485,68 +550,79 @@ if not df.empty:
 
     custom_colors = ["#009DAE", "#e66c37", "#461b09", "#f8a785", "#CC3636"]
 
-    # Group by day and sum the premiums
-    area_chart_new_renewals = df.groupby(df["Start Date"].dt.strftime("%Y-%m-%d"))['Total Premium_new'].sum().reset_index(name='Total Premium')
 
-    area_chart_endorsement = df.groupby(df["Start Date"].dt.strftime("%Y-%m-%d"))['Total Premium_endorsements'].sum().reset_index(name='Total Endorsements')
 
-    # Merge the new and renewals and endorsement data
-    area_chart = pd.merge(area_chart_new_renewals, area_chart_endorsement, left_on='Start Date', right_on='Start Date')
-
-    # Sort by the Date
-    area_chart = area_chart.sort_values("Start Date")
+    # Group by day and sum the totals for combined new and renewals, and endorsements
+    area_chart_combined = df_combined.groupby(df_combined["Start Date"].dt.strftime("%Y-%m-%d"))['Total'].sum().reset_index(name='Total Combined')
+    area_chart_endorsement = df_endorsements.groupby(df_endorsements["Start Date"].dt.strftime("%Y-%m-%d"))['Total'].sum().reset_index(name='Total Endorsements')
 
     with cols1:
-        # Create the dual-axis area chart
-        fig2 = make_subplots(specs=[[{"secondary_y": True}]])
+        # Merge the data frames on the 'Start Date'
+        area_chart = pd.merge(area_chart_combined, area_chart_endorsement, on='Start Date', how='outer')
 
-        # Add traces
-        fig2.add_trace(
-            go.Scatter(
-                x=area_chart['Start Date'], 
-                y=area_chart['Total Premium'], 
-                name="Total Premium", 
-                fill='tozeroy', 
-                line=dict(color='#e66c37')),
-            secondary_y=False,
+        # Fill NaN values with 0
+        area_chart = area_chart.fillna(0)
+
+        # Create the time series chart using Plotly
+        fig = go.Figure()
+
+        # Add Total Combined trace
+        fig.add_trace(go.Scatter(
+            x=area_chart['Start Date'],
+            y=area_chart['Total Combined'],
+            mode='lines',
+            name='Total Premium (New & Renewals)',
+            line=dict(color='#009DAE', width=2),
+            fill='tozeroy',
+            fillcolor='rgba(0, 157, 174, 0.5)'
+        ))
+
+        # Add Total Endorsements trace
+        fig.add_trace(go.Scatter(
+            x=area_chart['Start Date'],
+            y=area_chart['Total Endorsements'],
+            mode='lines',
+            name='Total Endorsements',
+            line=dict(color='#e66c37', width=2),
+            fill='tozeroy',
+            fillcolor='rgba(230, 108, 55, 0.5)'
+        ))
+
+        # Update layout
+        fig.update_layout(
+            xaxis_title='Date',
+            yaxis_title='Amount',
+            font=dict(color='Black'),
+            xaxis=dict(title_font=dict(size=14), tickfont=dict(size=12), type='category'),
+            yaxis=dict(title_font=dict(size=14), tickfont=dict(size=12)),
+            margin=dict(l=0, r=0, t=30, b=50),
+            height=450
         )
 
-        fig2.add_trace(
-            go.Scatter(
-                x=area_chart['Start Date'], 
-                y=area_chart['Total Endorsements'], 
-                name="Total Endorsements", 
-                fill='tozeroy', 
-                line=dict(color='#009DAE')),
-            secondary_y=True,
-        )
+        # Rotate x-axis labels for better readability
+        fig.update_xaxes(tickangle=45)
 
-        # Set x-axis title
-        fig2.update_xaxes(
-            title_text="Start Premium Date", 
-            tickangle=45)  # Rotate x-axis labels to 45 degrees for better readability
-
-        # Set y-axes titles
-        fig2.update_yaxes(
-            title_text="<b>Total Premium</b>", 
-            secondary_y=False)
-        fig2.update_yaxes(
-            title_text="<b>Total Endorsements</b>", 
-            secondary_y=True)
-
-        st.markdown('<h3 class="custom-subheader">Total Premium and Endorsements Over Time</h3>', unsafe_allow_html=True)
-        st.plotly_chart(fig2, use_container_width=True)
+        # Display the chart in Streamlit
+        st.markdown('<h3 class="custom-subheader">Total Combined Premium and Total Endorsements Over Time</h3>', unsafe_allow_html=True)
+        st.plotly_chart(fig, use_container_width=True)
 
 
 
+    # Group data by 'Year' and calculate the sum of Total Premium and Total Endorsements
+    yearly_data_combined = df_combined.groupby('Year')['Total'].sum().reset_index(name='Total Premium')
+    yearly_data_endorsements = df_endorsements.groupby('Year')['Total'].sum().reset_index(name='Total Endorsements')
 
-    # Group data by 'Year' and calculate the sum of Total Premium and Loss Ratio
-    yearly_data = df.groupby('Year')[['Total Premium', 'Total Amount sum']].sum().reset_index()
-
-
+    # Merge the data frames on the 'Year'
+    yearly_data = pd.merge(yearly_data_combined, yearly_data_endorsements, on='Year', how='outer')
 
     with cols2:
-        # Create the grouped bar chart for Total Premium and Loss Ratio
+        # Fill NaN values with 0
+        yearly_data = yearly_data.fillna(0)
+
+        # Define custom colors
+        custom_colors = ['#009DAE', '#e66c37']
+
+        # Create the grouped bar chart for Total Premium and Endorsements
         fig_yearly_avg_premium = go.Figure()
 
         # Add Total Premium bar trace
@@ -560,11 +636,11 @@ if not df.empty:
             marker_color=custom_colors[0]
         ))
 
-        # Add Loss Ratio bar trace
+        # Add Total Endorsements bar trace
         fig_yearly_avg_premium.add_trace(go.Bar(
             x=yearly_data['Year'],
-            y=yearly_data['Total Amount sum'],
-            name='Total Visit Amount',
+            y=yearly_data['Total Endorsements'],
+            name='Total Endorsements',
             textposition='inside',
             textfont=dict(color='white'),
             hoverinfo='x+y+name',
@@ -590,9 +666,7 @@ if not df.empty:
     cols1, cols2 = st.columns(2)
 
     # Group data by 'Year' and calculate the sum of Total Premium and Loss Ratio
-    yearly_data = df.groupby('Month')[['Total Premium', 'Total Amount sum']].sum().reset_index()
-
-
+    yearly_data = df.groupby('Year')[['Total', 'Total Amount sum']].sum().reset_index()
 
     with cols1:
         # Create the grouped bar chart for Total Premium and Loss Ratio
@@ -600,8 +674,56 @@ if not df.empty:
 
         # Add Total Premium bar trace
         fig_yearly_avg_premium.add_trace(go.Bar(
+            x=yearly_data['Year'],
+            y=yearly_data['Total'],
+            name='Total Premium',
+            textposition='inside',
+            textfont=dict(color='white'),
+            hoverinfo='x+y+name',
+            marker_color=custom_colors[0]
+        ))
+
+        # Add Loss Ratio bar trace
+        fig_yearly_avg_premium.add_trace(go.Bar(
+            x=yearly_data['Year'],
+            y=yearly_data['Total Amount sum'],
+            name='Expected Claim Amount',
+            textposition='inside',
+            textfont=dict(color='white'),
+            hoverinfo='x+y+name',
+            marker_color=custom_colors[1]
+        ))
+
+        fig_yearly_avg_premium.update_layout(
+            barmode='group',  # Grouped bar chart
+            xaxis_title="Year",
+            yaxis_title="Expected Claim Amount",
+            font=dict(color='Black'),
+            xaxis=dict(title_font=dict(size=14), tickfont=dict(size=12), type='category'),
+            yaxis=dict(title_font=dict(size=14), tickfont=dict(size=12)),
+            margin=dict(l=0, r=0, t=30, b=50),
+            height=450
+        )
+
+        # Display the chart in Streamlit
+        st.markdown('<h3 class="custom-subheader">Yearly Distribution of Total Premium and Expected Claim Amount</h3>', unsafe_allow_html=True)
+        st.plotly_chart(fig_yearly_avg_premium, use_container_width=True)
+
+
+
+    # Group data by 'Year' and calculate the sum of Total Premium and Loss Ratio
+    yearly_data = df.groupby('Month')[['Total', 'Total Amount sum']].sum().reset_index()
+
+
+
+    with cols2:
+        # Create the grouped bar chart for Total Premium and Loss Ratio
+        fig_yearly_avg_premium = go.Figure()
+
+        # Add Total Premium bar trace
+        fig_yearly_avg_premium.add_trace(go.Bar(
             x=yearly_data['Month'],
-            y=yearly_data['Total Premium'],
+            y=yearly_data['Total'],
             name='Total Premium',
             textposition='inside',
             textfont=dict(color='white'),
@@ -613,7 +735,7 @@ if not df.empty:
         fig_yearly_avg_premium.add_trace(go.Bar(
             x=yearly_data['Month'],
             y=yearly_data['Total Amount sum'],
-            name='Total Visit Amount',
+            name='Expected Claim Amount',
             textposition='inside',
             textfont=dict(color='white'),
             hoverinfo='x+y+name',
@@ -623,7 +745,7 @@ if not df.empty:
         fig_yearly_avg_premium.update_layout(
             barmode='group',  # Grouped bar chart
             xaxis_title="Month",
-            yaxis_title="Total Amount",
+            yaxis_title="Expected Claim Amount",
             font=dict(color='Black'),
             xaxis=dict(title_font=dict(size=14), tickfont=dict(size=12), type='category'),
             yaxis=dict(title_font=dict(size=14), tickfont=dict(size=12)),
@@ -632,9 +754,11 @@ if not df.empty:
         )
 
         # Display the chart in Streamlit
-        st.markdown('<h3 class="custom-subheader">Monthly Distribution of Total Premium and Endorsements</h3>', unsafe_allow_html=True)
+        st.markdown('<h3 class="custom-subheader">Monthly Distribution of Total Premium and Expected Claim Amount</h3>', unsafe_allow_html=True)
         st.plotly_chart(fig_yearly_avg_premium, use_container_width=True)
 
+
+    cols1, cols2 = st.columns(2)
 
     # Sort the DataFrame by Loss Ratio in descending order and select the top 10 clients
     top_10_clients = df.sort_values(by='Loss Ratio', ascending=False).head(10)
@@ -645,7 +769,7 @@ if not df.empty:
     # Define a single color for all bars
     single_color = '#009DAE'
 
-    with cols2:
+    with cols1:
         # Create the bar chart for Loss Ratio by Client Name
         fig = go.Figure()
 
@@ -675,8 +799,6 @@ if not df.empty:
 
 
 
-    cl1, cl2 =st.columns(2)
-
 
     # Sort the DataFrame by Loss Ratio in descending order and select the top 10 clients
     top_10_clients = df.sort_values(by='Total Amount sum', ascending=False).head(10)
@@ -684,7 +806,7 @@ if not df.empty:
     # Define a single color for all bars
     single_color = '#009DAE'
 
-    with cl1:
+    with cols2:
         # Create the bar chart for Loss Ratio by Client Name
         fig = go.Figure()
 
@@ -700,7 +822,7 @@ if not df.empty:
 
         fig.update_layout(
             barmode='group',
-            yaxis_title="Total Visit Amount",
+            yaxis_title="Expected Claim Amount",
             xaxis_title="Client Name",
             font=dict(color='Black'),
             xaxis=dict(title_font=dict(size=14), tickfont=dict(size=12)),
@@ -709,26 +831,28 @@ if not df.empty:
         )
 
         # Display the chart in Streamlit
-        st.markdown('<h3 class="custom-subheader">Top 10 Clients by Visit Amount</h3>', unsafe_allow_html=True)
+        st.markdown('<h3 class="custom-subheader">Top 10 Clients by Expected Claim Amount</h3>', unsafe_allow_html=True)
         st.plotly_chart(fig, use_container_width=True)
+
+    cl1, cl2 =st.columns(2)
 
 
     # Sort the DataFrame by Loss Ratio in descending order and select the top 10 clients
-    top_10_clients = df.sort_values(by='Total Premium', ascending=False).head(10)
+    top_10_clients = df.sort_values(by='Total', ascending=False).head(10)
 
     # Define a single color for all bars
     single_color = '#009DAE'
 
-    with cl2:
+    with cl1:
         # Create the bar chart for Loss Ratio by Client Name
         fig = go.Figure()
 
         # Add bars for each Client Name
         fig.add_trace(go.Bar(
             x=top_10_clients['Client Name'],
-            y=top_10_clients['Total Premium'],
-            name='Visit amount',
-            text=[f'{value:.2f}' for value in top_10_clients['Total Premium']],
+            y=top_10_clients['Total'],
+            name='Premium amount',
+            text=[f'{value:.2f}' for value in top_10_clients['Total']],
             textposition='auto',
             marker_color=single_color 
         ))
@@ -749,13 +873,12 @@ if not df.empty:
 
 
 
-    cl1, cl2 =st.columns(2)
 
  # Calculate the Total Premium by Client Segment
-    int_owner = df.groupby("Cover Type")["Total Premium"].sum().reset_index()
+    int_owner = df.groupby("Cover Type")["Total"].sum().reset_index()
     int_owner.columns = ["Cover Type", "Total Premium"]    
 
-    with cl1:
+    with cl2:
         # Display the header
         st.markdown('<h3 class="custom-subheader">Total Sales by Cover Type</h3>', unsafe_allow_html=True)
 
@@ -768,22 +891,6 @@ if not df.empty:
         # Display the chart in Streamlit
         st.plotly_chart(fig, use_container_width=True)
 
- # Calculate the Total Premium by Client Segment
-    int_seg = df.groupby("Client Segment")["Total Premium"].sum().reset_index()
-    int_seg.columns = ["Segment", "Total Premium"]    
-
-    with cl2:
-        # Display the header
-        st.markdown('<h3 class="custom-subheader">Total Sales by Client Segment</h3>', unsafe_allow_html=True)
-
-
-        # Create a donut chart
-        fig = px.pie(int_seg, names="Segment", values="Total Premium", hole=0.5, template="plotly_dark", color_discrete_sequence=custom_colors)
-        fig.update_traces(textposition='inside', textinfo='value+percent')
-        fig.update_layout(height=450, margin=dict(l=0, r=10, t=30, b=50))
-
-        # Display the chart in Streamlit
-        st.plotly_chart(fig, use_container_width=True)
 
 
 

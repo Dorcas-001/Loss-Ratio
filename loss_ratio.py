@@ -18,7 +18,7 @@ st.set_page_config(
 logo_url = 'EC_logo.png'  
 st.sidebar.image(logo_url, use_column_width=True)
 
-page = st.sidebar.selectbox("Choose a dashboard", ["Home", "Overview", "Loss Ratio View", "Visit View"])
+page = st.sidebar.selectbox("Choose a dashboard", ["Home", "Overview for Expected Claims","Overview for Actual Claims", "Loss Ratio View (Expected Claims)","Loss Ratio View (Actual Claims)", "Actual Claims View", "Expected Claims View"])
 
 st.markdown(
     """
@@ -96,11 +96,17 @@ if page == "Home":
 
     
 
-elif page == "Overview":
+elif page == "Overview for Expected Claims":
     exec(open("overview.py").read())
-elif page == "Loss Ratio View":
+elif page == "Overview for Actual Claims":
+    exec(open("overview_c.py").read())
+elif page == "Loss Ratio View (Expected Claims)":
     exec(open("loss_ratio_view.py").read())
-elif page == "Visit View":
+elif page == "Expected Claims View":
     exec(open("visit.py").read())
+elif page == "Actual Claims View":
+    exec(open("claims.py").read())
+elif page == "Loss Ratio View (Actual Claims)":
+    exec(open("loss.py").read())
 elif page == "Premium View":
     exec(open("premium.py").read())

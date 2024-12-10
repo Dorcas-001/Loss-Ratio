@@ -28,58 +28,100 @@ st.markdown('''
     </style>
 ''', unsafe_allow_html=True)
 
-st.markdown('<h1 class="main-title">KPI METRICS VIEW DASHBOARD</h1>', unsafe_allow_html=True)
+st.markdown('<h1 class="main-title">KPI METRICS VIEW WITH EXPECTED CLAIM AMOUNT</h1>', unsafe_allow_html=True)
 
 
 
 # Filepaths and sheet names
-filepath_premiums = "WRITTEN PREMIUM 2024 (1).xlsx"
-sheet_name_new_business = "NEW BUSINES"
-sheet_name_endorsements = "ENDORSMENTS"
+filepath_premiums = "JAN-NOV 2024 GWP.xlsx"
+sheet_name_new_business = "2023"
+sheet_name_endorsements = "2024"
 filepath_visits = "VisitLogs_25Oct2024 (1).xlsx"
 
 # Read the premium data
-df_new_business = pd.read_excel(filepath_premiums, sheet_name=sheet_name_new_business)
-df_endorsements = pd.read_excel(filepath_premiums, sheet_name=sheet_name_endorsements)
+df_2023 = pd.read_excel(filepath_premiums, sheet_name=sheet_name_new_business)
+df_2024 = pd.read_excel(filepath_premiums, sheet_name=sheet_name_endorsements)
 
 # Read the visit logs
 df_visits = pd.read_excel(filepath_visits)
 
+df_premiums = pd.concat([df_2023, df_2024])
 
-# Function to calculate days since start
+drop_cols=['Amount Received - Jan _ march', 'MONTH', 'Contract days', 'Cover days', 'Amount Received - April', 'Amount Received - May', 'Amount Received - June', 'Amount Received - JULY', 'Unnamed: 25', 'Unnamed: 26', 'Unnamed: 27']
+
+df_premiums.drop(columns=drop_cols, inplace = True)
+
+df_premiums["Start Date"] = pd.to_datetime(df_premiums["Start Date"])
+df_premiums["Month"] = df_premiums["Start Date"].dt.strftime("%B")
+df_premiums["Year"] = df_premiums["Start Date"].dt.year
+
+
+# Split the DataFrame into two: one with endorsements and one without
+df_endorsements = df_premiums[df_premiums['Cover Type'].str.contains('Endorsement', case=False, na=False)]
+df_non_endorsements = df_premiums[~df_premiums['Cover Type'].str.contains('Endorsement', case=False, na=False)]
+
+# Calculate 'Days Since Start' and 'days_on_cover' for non-endorsement rows
 current_date = datetime.now()
+df_non_endorsements['Days Since Start'] = (current_date - df_non_endorsements['Start Date']).dt.days
+df_non_endorsements['days_on_cover'] = (df_non_endorsements['End Date'] - df_non_endorsements['Start Date']).dt.days
 
-def calculate_days(row):
-    start_date = row['Start Date']
-    if pd.notnull(start_date):
-        days = (current_date - pd.to_datetime(start_date)).days
-    else:
-        days = None
-    return days
-
-# Calculate 'Days Since Start' for each row
-df_new_business['Days Since Start'] = df_new_business.apply(calculate_days, axis=1)
-
-# Calculate 'days_on_cover'
-df_new_business["days_on_cover"] = (df_new_business["End Date"] - df_new_business['Start Date']).dt.days
 
 # Prioritize 'renewed' cover type values
-def prioritize_renewed(df):
-    df_sorted = df.sort_values(by=['Client Name', 'Cover Type'], ascending=[True, False])
-    df_deduped = df_sorted.drop_duplicates(subset=['Client Name'], keep='first')
-    return df_deduped
+def prioritize_renewal(df):
+    # Identify clients with both 'new' and 'renewal' cover types
+    clients_with_both = df.groupby('Client Name')['Cover Type'].nunique()
+    clients_with_both = clients_with_both[clients_with_both == 2].index
+    
+    # Separate clients with both cover types from others
+    df_clients_with_both = df[df['Client Name'].isin(clients_with_both)]
+    df_other_clients = df[~df['Client Name'].isin(clients_with_both)]
+    
+    # Sort and deduplicate clients with both cover types, prioritizing 'renewal'
+    df_clients_with_both_sorted = df_clients_with_both.sort_values(by=['Client Name', 'Cover Type'], ascending=[True, False])
+    df_clients_with_both_deduped = df_clients_with_both_sorted.drop_duplicates(subset=['Client Name'], keep='first')
+    
+    # Combine the deduplicated clients with both cover types and the other clients
+    df_result = pd.concat([df_clients_with_both_deduped, df_other_clients])
+    
+    return df_result
 
-df_new_business = prioritize_renewed(df_new_business)
+df_prioritized = prioritize_renewal(df_non_endorsements)
+
+# Merge endorsements with premiums on Client Name
+df_merged_endorsements = pd.merge(df_endorsements, df_prioritized[['Client Name', 'Start Date', 'End Date']], on='Client Name', suffixes=('_endorsement', '_premium'))
+
+# Filter endorsements to include only those within the start and end date range of the premiums
+df_filtered_endorsements = df_merged_endorsements[
+    (df_merged_endorsements['Start Date_endorsement'] >= df_merged_endorsements['Start Date_premium']) & 
+    (df_merged_endorsements['Start Date_endorsement'] <= df_merged_endorsements['End Date_premium'])
+]
+
+# Drop the additional date columns used for filtering
+df_filtered_endorsements = df_filtered_endorsements.drop(columns=['Start Date_premium', 'End Date_premium'])
+
+# Rename the date columns back to their original names
+df_filtered_endorsements = df_filtered_endorsements.rename(columns={'Start Date_endorsement': 'Start Date', 'End Date_endorsement': 'End Date'})
+
+# Combine the processed non-endorsement DataFrame with the filtered endorsements DataFrame
+df_premiums = pd.concat([df_prioritized, df_filtered_endorsements])
+
+# Reset the index of the resulting DataFrame
+df_premiums.reset_index(drop=True, inplace=True)
 
 
-# Ensure Visit Date is in datetime format
 df_visits['Visit Date'] = pd.to_datetime(df_visits['Visit Date'])
+df_premiums['Start Date'] = pd.to_datetime(df_premiums['Start Date'])
+df_premiums['End Date'] = pd.to_datetime(df_premiums['End Date'])
 
 # Merge new business data with visit data on Client Name
-df_merged = pd.merge(df_visits, df_new_business[['Client Name', 'Start Date']], on='Client Name', how='inner')
+df_merged = pd.merge(df_visits, df_premiums[['Client Name', 'Start Date', 'End Date']], on='Client Name', how='outer')
 
-# Filter visits to include only those within the start date range
-df_filtered_visits = df_merged[df_merged['Visit Date'] >= df_merged['Start Date']]
+
+# Filter visits to include only those within the start and end date range
+df_filtered_visits = df_merged[
+    (df_merged['Visit Date'] >= df_merged['Start Date']) & 
+    (df_merged['Visit Date'] <= df_merged['End Date'])
+]
 
 
 # Aggregate visit data by 'Client Name'
@@ -95,19 +137,22 @@ df_visits_agg = df_filtered_visits.groupby('Client Name').agg({
 # Flatten the column names after aggregation
 df_visits_agg.columns = [' '.join(col).strip() if isinstance(col, tuple) else col for col in df_visits_agg.columns]
 
+df_visits_agg['Visit Date min'] = pd.to_datetime(df_visits_agg['Visit Date min'], errors='coerce')
+
 # Extract 'Month' and 'Year' from the minimum visit date
 df_visits_agg['Month'] = df_visits_agg['Visit Date min'].dt.strftime('%B')
 df_visits_agg['Year'] = df_visits_agg['Visit Date min'].dt.year
 
+# Clean Client Name columns to ensure consistency
+df_visits_agg['Client Name'] = df_visits_agg['Client Name'].str.strip().str.lower()
+df_premiums['Client Name'] = df_premiums['Client Name'].str.strip().str.lower()
 
-# Merge the new business and endorsement data on 'Client Name'
-df_premiums = pd.concat([df_new_business, df_endorsements])
-# Assuming df_premiums is your DataFrame
-print("Column names in the DataFrame:")
-print(df_premiums.columns.tolist())
+# Ensure Client Name columns are of the same data type
+df_visits_agg['Client Name'] = df_visits_agg['Client Name'].astype(str)
+df_premiums['Client Name'] = df_premiums['Client Name'].astype(str)
 
-drop_cols = ['Unnamed: 14', 'Unnamed: 15','NAMES', 'DAYS','Intermediary name', 'First issued quote date', 'Aging', 'Scheme Name','Annual Premium', 'Prorated Premium', 'CBHI', 'Admin','5% CBHI', 'Admin fees', 'Total insured Premium', 'Fund Amount','Basic Premium']
-df_premiums.drop(columns=drop_cols, inplace = True)
+# Merge the aggregated visit data with the premium data on Client Name
+df_combined = pd.merge(df_visits_agg, df_premiums, on='Client Name', how='outer')
 
 
 
@@ -121,6 +166,7 @@ df_combined["End Date"] = pd.to_datetime(df_combined["End Date"])
 
 df = df_combined
 
+df["Client Name"] = df["Client Name"].str.upper()
 
 
 
@@ -174,9 +220,59 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 
+
+
+
+
+# Dictionary to map month names to their order
+month_order = {
+    "January": 1, "February": 2, "March": 3, "April": 4, 
+    "May": 5, "June": 6, "July": 7, "August": 8, 
+    "September": 9, "October": 10, "November": 11, "December": 12
+}
+
+# Sort months based on their order
+sorted_months = sorted(df['Month'].dropna().unique(), key=lambda x: month_order[x])
+
+
+# Sidebar for filters
+st.sidebar.header("Filters")
+year = st.sidebar.multiselect("Select Year", options=sorted(df['Year'].dropna().unique()))
+month = st.sidebar.multiselect("Select Month", options=sorted_months)
+cover = st.sidebar.multiselect("Select Cover Type", options=df['Cover Type'].unique())
+product = st.sidebar.multiselect("Select Product", options=df['Product'].unique())
+
+# segment = st.sidebar.multiselect("Select Client Segment", options=df['Client Segment'].unique())
+client_names = sorted(df['Client Name'].unique())
+client_name = st.sidebar.multiselect("Select Client Name", options=client_names)
+
+# Apply filters to the DataFrame
+if 'Start Year' in df.columns and year:
+    df = df[df['Start Year'].isin(year)]
+if 'Start Month' in df.columns and month:
+    df = df[df['Start Month'].isin(month)]
+if 'Cover Type' in df.columns and cover:
+    df = df[df['Cover Type'].isin(cover)]
+if 'Product' in df.columns and product:
+    df = df[df['Product'].isin(product)]
+if 'Client Name' in df.columns and client_name:
+    df = df[df['Client Name'].isin(client_name)]
+
+# Determine the filter description
+filter_description = ""
+if year:
+    filter_description += f"{', '.join(map(str, year))} "
+if cover:
+    filter_description += f"{', '.join(map(str, cover))} "
+if month:
+    filter_description += f"{', '.join(month)} "
+if not filter_description:
+    filter_description = "All data"
+
+
 # Get minimum and maximum dates for the date input
 startDate = df["Start Date"].min()
-endDate = df["Start Date"].max()
+endDate = df["End Date"].max()
 
 # Define CSS for the styled date input boxes
 st.markdown("""
@@ -194,6 +290,7 @@ st.markdown("""
     }
     </style>
     """, unsafe_allow_html=True)
+
 
 
 # Create 2-column layout for date inputs
@@ -217,49 +314,6 @@ with col2:
     date2 = pd.to_datetime(display_date_input(col2, "End Date", endDate, startDate, endDate))
 
 
-
-# Dictionary to map month names to their order
-month_order = {
-    "January": 1, "February": 2, "March": 3, "April": 4, 
-    "May": 5, "June": 6, "July": 7, "August": 8, 
-    "September": 9, "October": 10, "November": 11, "December": 12
-}
-
-# Sort months based on their order
-sorted_months = sorted(df['Month'].dropna().unique(), key=lambda x: month_order[x])
-
-
-# Sidebar for filters
-st.sidebar.header("Filters")
-year = st.sidebar.multiselect("Select Year", options=sorted(df['Year'].dropna().unique()))
-month = st.sidebar.multiselect("Select Month", options=sorted_months)
-cover = st.sidebar.multiselect("Select Cover Type", options=df['Cover Type'].unique())
-segment = st.sidebar.multiselect("Select Client Segment", options=df['Client Segment'].unique())
-client_name = st.sidebar.multiselect("Select Client Name", options=df['Client Name'].unique())
-
-
-# Apply filters to the DataFrame
-if 'Start Year' in df.columns and year:
-    df = df[df['Start Year'].isin(year)]
-if 'Start Month' in df.columns and month:
-    df = df[df['Start Month'].isin(month)]
-if 'Cover Type' in df.columns and cover:
-    df = df[df['Cover Type'].isin(cover)]
-if 'Client Segment' in df.columns and segment:
-    df = df[df['Client Segment'].isin(segment)]
-if 'Client Name' in df.columns and client_name:
-    df = df[df['Client Name'].isin(client_name)]
-
-# Determine the filter description
-filter_description = ""
-if year:
-    filter_description += f"{', '.join(map(str, year))} "
-if cover:
-    filter_description += f"{', '.join(map(str, cover))} "
-if month:
-    filter_description += f"{', '.join(month)} "
-if not filter_description:
-    filter_description = "All data"
 
 
 # Handle non-finite values in 'Start Year' column
@@ -302,51 +356,50 @@ df = df[
 
 
 
-# Filter the concatenated DataFrame to include only endorsements
-df_hares = df[df['Client Segment'] == 'Hares']
-df_elephants = df[df['Client Segment'] == 'Elephant']
-df_tiger = df[df['Client Segment'] == 'Tigers']
-df_whale = df[df['Client Segment'] == 'Whale']
+# # Filter the concatenated DataFrame to include only endorsements
+# df_hares = df[df['Client Segment'] == 'Hares']
+# df_elephants = df[df['Client Segment'] == 'Elephant']
+# df_tiger = df[df['Client Segment'] == 'Tigers']
+# df_whale = df[df['Client Segment'] == 'Whale']
 
-df_new = df[df['Cover Type'] == 'New Insured']
-df_renew = df[df['Cover Type'] == 'Renew/Insured']
 
-df
+df_new = df[df['Cover Type'] == 'New']
+df_renew = df[df['Cover Type'] == 'Renewal']
+
+df_endorsements = df[df['Cover Type'] == 'Endorsement']
 
 if not df.empty:
 
     scale=1_000_000  # For millions
 
-    df["No. of staffs"] = pd.to_numeric(df["No. of staffs"], errors='coerce').fillna(0).astype(int)
-    df["Dependents"] = pd.to_numeric(df["Dependents"], errors='coerce').fillna(0).astype(int)
 
     # Scale the sums
 
-    total_hares = (df_hares['Total Premium'].sum())/scale
-    total_tiger = (df_tiger['Total Premium'].sum())/scale
-    total_elephant = (df_elephants['Total Premium'].sum())/scale
-    total_whale = (df_whale['Total Premium'].sum())/scale
+    # total_hares = (df_hares['Total Premium'].sum())/scale
+    # total_tiger = (df_tiger['Total Premium'].sum())/scale
+    # total_elephant = (df_elephants['Total Premium'].sum())/scale
+    # total_whale = (df_whale['Total Premium'].sum())/scale
 
-    total_new = (df_new["Total Premium"].sum())/scale
-    total_renew = (df_renew["Total Premium"].sum())/scale
+    total_new = (df_new["Total"].sum())/scale
+    total_renew = (df_renew["Total"].sum())/scale
+    total_endorsements_amount = df_endorsements["Total"].sum()/scale
+    total_pharm = df["Pharmacy Claim Amount sum"].sum()/scale
 
     total_clients = df["Client Name"].nunique()
-    total_mem = df["No. of staffs"].sum()
-    total_dependents = df["Dependents"].sum()
-    total_lives = df["Total lives"].sum()
-    average_dep = total_mem/total_dependents
+    total_endorsements = df_endorsements["Client Name"].count()
+    num_new = df_new["Client Name"].nunique()
+    num_renew = df_renew["Client Name"].nunique()
+    num_visits = df["Visit ID count"].sum()
 
-    total_days_on_cover = df["days_on_cover"].sum()
 
-    total_new_premium = (df["Total Premium_new"].sum())/scale
-    total_endorsement = (df["Total Premium_endorsements"].sum())/scale
-    total_premium = (df["Total Premium"].sum())/scale
+    # total_new_premium = (df["Total Premium_new"].sum())/scale
+    # total_endorsement = (df["Total Premium_endorsements"].sum())/scale
+    total_premium = (df["Total"].sum())/scale
     total_days = df["Days Since Start"].sum()
     total_days_on_cover = df['days_on_cover'].sum()
     total_amount = (df["Total Amount sum"].sum())/scale
-    average_pre = (df["Total Premium"].mean())/scale
+    average_pre = (df["Total"].mean())/scale
     average_days = df["Days Since Start"].mean()
-    average_premium_per_life = total_premium/total_mem
 
     earned_premium = (total_premium * total_days)/total_days_on_cover
     loss_ratio_amount = total_amount / earned_premium
@@ -386,7 +439,7 @@ if not df.empty:
         </style>
         """, unsafe_allow_html=True)
 
-
+    st.dataframe(df)
 
     # Function to display metrics in styled boxes with tooltips
     def display_metric(col, title, value):
@@ -398,42 +451,40 @@ if not df.empty:
             """, unsafe_allow_html=True)
 
 
-
-
     # Calculate key metrics
-    st.markdown('<h2 class="custom-subheader">For all Sales</h2>', unsafe_allow_html=True)    
+    st.markdown('<h2 class="custom-subheader">For all Sales in Numbers</h2>', unsafe_allow_html=True)    
 
     cols1,cols2, cols3 = st.columns(3)
 
-    display_metric(cols1, "Total Clients", total_clients)
-    display_metric(cols2, "Total Premium", F"{total_premium: .0F} M")
-    display_metric(cols3, "Total New Business Premium", F"{total_new_premium: .0F} M")
-    display_metric(cols1, "Total Endorsement", F"{total_endorsement: .0F} M")
-    display_metric(cols2, "Total New Premium", F"{total_new: .0F} M")
-    display_metric(cols3, "Total Renewals", F"{total_renew: .0F} M")
+    display_metric(cols1, "Number of Clients", total_clients)
+    display_metric(cols2, "Number of New Business", num_new)
+    display_metric(cols3, "Number of Renewals", num_renew)
+    display_metric(cols1, "Number of Endorsements",total_endorsements)
+    display_metric(cols2, "Number of Visits", f"{num_visits:,.0f}")
+
+    # Calculate key metrics
+    st.markdown('<h2 class="custom-subheader">For all Sales Amount</h2>', unsafe_allow_html=True)    
+
+    cols1,cols2, cols3 = st.columns(3)
+
+    display_metric(cols1, "Total Premium", f"{total_premium:,.0f} M")
+    display_metric(cols2, "Total New Business Premium", f"{total_new:,.0f} M")
+    display_metric(cols3, "Total Renewal Premium", f"{total_renew:,.0f} M")
+    display_metric(cols1, "Total Endorsement Premium", f"{total_endorsements_amount:,.0f} M")
+    display_metric(cols2, "Total Expected Pharmacy Amount", f"{total_pharm:,.0f} M")
+    display_metric(cols3, "Total Expected Claim Amount", f"{total_amount:,.0f} M")
+    display_metric(cols1, "Average Premium per Client", f"{average_pre:,.0f} M")
 
     st.markdown('<h2 class="custom-subheader">For Loss Ratio</h2>', unsafe_allow_html=True)    
   
     cols1,cols2, cols3 = st.columns(3)
 
-    display_metric(cols1, "Total Expected Claim Amount", f"{total_amount:.0f} M")
-    display_metric(cols2, "Days Since  Premium Start", f"{total_days:.0f} days")
-    display_metric(cols3, "Premium Duration (Days)", f"{total_days_on_cover:.0f} days")
-    display_metric(cols1, "Earned Premium", f"{earned_premium: .0f} M")
-    display_metric(cols2, "Loss Ratio", f"{loss_ratio_amount: .0f} M")
+    display_metric(cols1, "Days Since  Premium Start", f"{total_days:,.0f} days")
+    display_metric(cols2, "Premium Duration (Days)", f"{total_days_on_cover:,.0f} days")
+    display_metric(cols3, "Average Days Since  Premium Start per Client", f"{average_days:,.0f} days")
+    display_metric(cols1, "Earned Premium", f"{earned_premium:,.0f} M")
+    display_metric(cols2, "Loss Ratio", f"{loss_ratio_amount:,.0f} M")
     display_metric(cols3, "Percentage Loss Ratio", f"{loss_ratio: .0f} %")
 
 
-    # Calculate key metrics
-    st.markdown('<h2 class="custom-subheader">For Lives Covered</h2>', unsafe_allow_html=True)    
 
-    cols1,cols2, cols3 = st.columns(3)
-
-    display_metric(cols1, "Total Lives Covered", f"{total_lives:.0f}")
-    display_metric(cols2, "Total Principal Members", total_mem)
-    display_metric(cols3, "Total Dependents", total_dependents)
-    display_metric(cols1, "Average Dependents Per Principal Member", f"{average_dep:.0f}")
-    display_metric(cols2, "Average Premium Per Principal Member", f"{average_premium_per_life:.0f}")
-
-
-    st.dataframe(df)
