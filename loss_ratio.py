@@ -1,4 +1,3 @@
-
 import streamlit as st
 import pandas as pd
 import altair as alt
@@ -6,6 +5,8 @@ from PIL import Image
 import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime
+
+
 
 st.set_page_config(
     page_title="Eden Care Loss Ratio Dashboard",
@@ -93,8 +94,6 @@ if page == "Home":
     st.markdown('<div class="text">3. <strong>Manage Table:</strong> click on the dropdown icon (<img src="https://img.icons8.com/ios-glyphs/30/000000/expand-arrow.png"/>) on table below each visual to get a full view of the table data and use the options on the top right corner of each table to download or search and view on fullscreen.</div>', unsafe_allow_html=True)    
     st.markdown('<div class="text">4. <strong>Refresh Data:</strong> The data will be manually refreshed on the last week of every quarter. </div>', unsafe_allow_html=True)
     st.markdown('<div class="separator"></div>', unsafe_allow_html=True)
-
-    
 
 elif page == "Overview for Expected Claims":
     exec(open("overview.py").read())

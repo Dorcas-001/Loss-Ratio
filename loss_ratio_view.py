@@ -47,7 +47,7 @@ df_visits = pd.read_excel(filepath_visits)
 
 df_premiums = pd.concat([df_2023, df_2024])
 
-drop_cols=['Amount Received - Jan _ march', 'MONTH', 'Contract days', 'Cover days', 'Amount Received - April', 'Amount Received - May', 'Amount Received - June', 'Amount Received - JULY','Unnamed: 24', 'Unnamed: 25', 'Unnamed: 26']
+drop_cols=['Amount Received - Jan _ march', 'MONTH', 'Contract days', 'Cover days', 'Amount Received - April', 'Amount Received - May', 'Amount Received - June', 'Amount Received - JULY','Unnamed: 27', 'Unnamed: 25', 'Unnamed: 26']
 
 df_premiums.drop(columns=drop_cols, inplace = True)
 
