@@ -17,7 +17,7 @@ def hash_password(password):
 users = [
     {"username": "Dorcas", "password": "Dorcas123"},
     {"username": "Tshepo", "password": "Tshepo123"},
-    {"username": "Innocent", "password": "Innocent123"}
+    {"username": "Innocent", "password": "Innocent123"},
     {"username": "Bruce", "password": "Bruce123"},
     {"username": "Penny", "password": "Penny123"},
     {"username": "Francis", "password": "Francis123"}
